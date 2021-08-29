@@ -163,12 +163,12 @@ export class StressTestStack extends cdk.Stack {
                 cloudMapNamespace: namespace,
                 name: "worker"
             },
-            capacityProviderStrategies: [
-                {
-                    capacityProvider: 'FARGATE_SPOT',
-                    weight: 1,
-                }
-            ]
+            // capacityProviderStrategies: [
+            //     {
+            //         capacityProvider: 'FARGATE_SPOT',
+            //         weight: 1,
+            //     }
+            // ]
         })
     }
 }

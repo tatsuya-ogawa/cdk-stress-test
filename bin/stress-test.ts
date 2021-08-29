@@ -29,5 +29,5 @@ new StressTestStack(app, 'StressTestStack', {
     NameSpace: nameSpace,
     DockerDir: dockerDir,
     DesiredCount: desiredCount,
-    AllowHost: allowHostCsv?.split(",")
+    AllowHost: allowHostCsv?.split(","),
 });
