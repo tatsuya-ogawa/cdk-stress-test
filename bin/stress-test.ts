@@ -7,7 +7,7 @@ const app = new cdk.App();
 const cpu: number = app.node.tryGetContext("Cpu") || 512;
 const memory: number = app.node.tryGetContext("Memory") || 1024;
 const desiredCount: number = app.node.tryGetContext("DesiredCount") || 2;
-const allowHostCsv: string = app.node.tryGetContext("AllowHostCsv") || [];
+const allowHostCsv: string = app.node.tryGetContext("AllowHostCsv");
 const dockerDir: string = app.node.tryGetContext("DockerDir");
 const nameSpace: string = app.node.tryGetContext("NameSpace");
 new StressTestStack(app, 'StressTestStack', {

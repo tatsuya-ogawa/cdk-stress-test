@@ -14,8 +14,8 @@ interface StressTestStackProps extends cdk.StackProps {
     Cpu: number,
     Memory: number,
     DockerDir: string,
-    DesiredCount:number,
-    AllowHost?:string[]
+    DesiredCount: number,
+    AllowHost?: string[]
 }
 
 export class StressTestStack extends cdk.Stack {
@@ -53,7 +53,9 @@ export class StressTestStack extends cdk.Stack {
             }
         );
 
-        const cluster = new ecs.Cluster(this, `EcsCluster`, {vpc});
+        const cluster = new ecs.Cluster(this, `EcsCluster`, {
+            vpc: vpc, enableFargateCapacityProviders: true
+        });
         const executionRole = new iam.Role(this, `EcsTaskExecutionRole`, {
             assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
             managedPolicies: [
@@ -101,7 +103,7 @@ export class StressTestStack extends cdk.Stack {
             ec2.Peer.ipv4(cidr),
             ec2.Port.allTraffic()
         );
-        props.AllowHost?.forEach((cidr)=>{
+        props.AllowHost?.forEach((cidr) => {
             securityGroup.addIngressRule(
                 ec2.Peer.ipv4(cidr),
                 ec2.Port.allTraffic()
@@ -120,8 +122,8 @@ export class StressTestStack extends cdk.Stack {
                     cloudMapNamespace: namespace,
                     name: "master"
                 },
-                publicLoadBalancer:true,
-                assignPublicIp:true,
+                publicLoadBalancer: true,
+                assignPublicIp: true,
                 openListener: false
             }
         );
@@ -143,7 +145,7 @@ export class StressTestStack extends cdk.Stack {
                 streamPrefix: "worker"
             }),
             command: [
-                "-f", "locustfile.py","--worker","--master-host",`master.${props.NameSpace}`
+                "-f", "locustfile.py", "--worker", "--master-host", `master.${props.NameSpace}`
             ],
             portMappings: [{
                 containerPort: 8089,
@@ -153,7 +155,7 @@ export class StressTestStack extends cdk.Stack {
         });
         const serviceFargateService = new ecs.FargateService(this, 'WorkerServiceDefinition', {
             cluster,
-            vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE }),
+            vpcSubnets: vpc.selectSubnets({subnetType: ec2.SubnetType.PRIVATE}),
             securityGroup,
             taskDefinition: workerServiceTaskDefinition,
             desiredCount: props.DesiredCount,
@@ -161,6 +163,12 @@ export class StressTestStack extends cdk.Stack {
                 cloudMapNamespace: namespace,
                 name: "worker"
             },
+            capacityProviderStrategies: [
+                {
+                    capacityProvider: 'FARGATE_SPOT',
+                    weight: 1,
+                }
+            ]
         })
     }
 }
