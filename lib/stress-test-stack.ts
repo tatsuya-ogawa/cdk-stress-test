@@ -13,16 +13,18 @@ interface StressTestStackProps extends cdk.StackProps {
     NameSpace: string,
     Cpu: number,
     Memory: number,
-    DockerDir: string
+    DockerDir: string,
+    DesiredCount:number,
+    AllowHost?:string[]
 }
 
 export class StressTestStack extends cdk.Stack {
     constructor(scope: cdk.Construct, id: string, props: StressTestStackProps) {
         super(scope, id, props);
-
+        const cidr = "10.0.0.0/16"
         // The code that defines your stack goes here
         const vpc = new ec2.Vpc(this, `VPC`, {
-            cidr: "10.0.0.0/16",
+            cidr: cidr,
             subnetConfiguration: [
                 {
                     cidrMask: 24,
@@ -51,10 +53,6 @@ export class StressTestStack extends cdk.Stack {
             }
         );
 
-        const cloudMapService = namespace.createService(`CloudMapService`, {
-            dnsRecordType: servicediscovery.DnsRecordType.A
-        });
-
         const cluster = new ecs.Cluster(this, `EcsCluster`, {vpc});
         const executionRole = new iam.Role(this, `EcsTaskExecutionRole`, {
             assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
@@ -67,16 +65,15 @@ export class StressTestStack extends cdk.Stack {
         });
         const logGroup = new logs.LogGroup(this, `ServiceLogGroup`, {});
 
+        const imageAsset = new assets.DockerImageAsset(this, `ImageAsset`, {
+            directory: props.DockerDir,
+            repositoryName: "stress-test",
+        });
         const masterServiceTaskDefinition = new ecs.FargateTaskDefinition(this, `MasterServiceTaskDefinition`, {
             cpu: props.Cpu,
             memoryLimitMiB: props.Memory,
             executionRole: executionRole,
             taskRole: serviceTaskRole,
-        });
-
-        const imageAsset = new assets.DockerImageAsset(this, `ImageAsset`, {
-            directory: props.DockerDir,
-            repositoryName: "stress-test",
         });
         masterServiceTaskDefinition.addContainer(`MasterServiceTaskContainerDefinition`, {
             image: ecs.ContainerImage.fromDockerImageAsset(imageAsset),
@@ -90,7 +87,7 @@ export class StressTestStack extends cdk.Stack {
             command: [
                 "-f", "locustfile.py", "--master", "-H", `http://master.${props.NameSpace}:8089`
             ],
-            portMappings:[{
+            portMappings: [{
                 containerPort: 8089,
                 hostPort: 8089,
                 protocol: ecs.Protocol.TCP,
@@ -99,27 +96,71 @@ export class StressTestStack extends cdk.Stack {
 
         const securityGroup = new ec2.SecurityGroup(this, `SecurityGroup`, {
             vpc: vpc
+        })
+        securityGroup.addIngressRule(
+            ec2.Peer.ipv4(cidr),
+            ec2.Port.allTraffic()
+        );
+        props.AllowHost?.forEach((cidr)=>{
+            securityGroup.addIngressRule(
+                ec2.Peer.ipv4(cidr),
+                ec2.Port.allTraffic()
+            );
         });
-        // const serviceFargateService = new ecs.FargateService(this, `MasterServiceServiceDefinition`, {
-        //     cluster,
-        //     vpcSubnets: vpc.selectSubnets({subnetType: ec2.SubnetType.PRIVATE}),
-        //     securityGroup,
-        //     taskDefinition: masterServiceTaskDefinition,
-        //     desiredCount: 2,
-        //     maxHealthyPercent: 200,
-        //     minHealthyPercent: 50,
-        // })
-        new patterns.ApplicationLoadBalancedFargateService(
+        const masterService = new patterns.ApplicationLoadBalancedFargateService(
             this,
-            `ALB`,
+            `ApplicationLoadBalancedFargateService`,
             {
                 cluster,
-                taskDefinition:masterServiceTaskDefinition,
+                taskDefinition: masterServiceTaskDefinition,
                 platformVersion: ecs.FargatePlatformVersion.LATEST,
-                securityGroups:[securityGroup],
+                securityGroups: [securityGroup],
                 taskSubnets: vpc.selectSubnets({subnetType: ec2.SubnetType.PRIVATE}),
-                openListener:false
+                cloudMapOptions: {
+                    cloudMapNamespace: namespace,
+                    name: "master"
+                },
+                publicLoadBalancer:true,
+                assignPublicIp:true,
+                openListener: false
             }
         );
+        masterService.targetGroup.setAttribute('deregistration_delay.timeout_seconds', '10');
+
+        const workerServiceTaskDefinition = new ecs.FargateTaskDefinition(this, `WorkerServiceTaskDefinition`, {
+            cpu: props.Cpu,
+            memoryLimitMiB: props.Memory,
+            executionRole: executionRole,
+            taskRole: serviceTaskRole,
+        });
+        workerServiceTaskDefinition.addContainer(`MasterServiceTaskContainerDefinition`, {
+            image: ecs.ContainerImage.fromDockerImageAsset(imageAsset),
+            cpu: props.Cpu,
+            memoryLimitMiB: props.Memory,
+            memoryReservationMiB: props.Memory,
+            logging: ecs.LogDriver.awsLogs({
+                logGroup,
+                streamPrefix: "worker"
+            }),
+            command: [
+                "-f", "locustfile.py","--worker","--master-host",`master.${props.NameSpace}`
+            ],
+            portMappings: [{
+                containerPort: 8089,
+                hostPort: 8089,
+                protocol: ecs.Protocol.TCP,
+            }]
+        });
+        const serviceFargateService = new ecs.FargateService(this, 'WorkerServiceDefinition', {
+            cluster,
+            vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE }),
+            securityGroup,
+            taskDefinition: workerServiceTaskDefinition,
+            desiredCount: props.DesiredCount,
+            cloudMapOptions: {
+                cloudMapNamespace: namespace,
+                name: "worker"
+            },
+        })
     }
 }
